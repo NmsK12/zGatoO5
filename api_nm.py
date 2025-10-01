@@ -392,10 +392,50 @@ def nm_result():
 # Inicializar Telethon cuando se importa el módulo (para Gunicorn)
 init_telethon_thread()
 
+def update_all_time_remaining():
+    """Actualiza el tiempo restante de todas las API Keys"""
+    try:
+        import sqlite3
+        from datetime import datetime
+        
+        conn = sqlite3.connect('api_keys.db')
+        cursor = conn.cursor()
+        
+        # Obtener todas las API Keys
+        cursor.execute('SELECT key, expires_at FROM api_keys')
+        keys = cursor.fetchall()
+        
+        updated_count = 0
+        for key, expires_at in keys:
+            # Calcular tiempo restante real
+            expires_dt = datetime.fromisoformat(expires_at)
+            now = datetime.now()
+            time_remaining = int((expires_dt - now).total_seconds())
+            
+            # Actualizar en la base de datos
+            cursor.execute('''
+                UPDATE api_keys 
+                SET time_remaining = ? 
+                WHERE key = ?
+            ''', (max(0, time_remaining), key))
+            
+            updated_count += 1
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ Actualizadas {updated_count} API Keys")
+        
+    except Exception as e:
+        logger.error(f"❌ Error actualizando tiempo restante: {e}")
+
 def main():
     """Función principal."""
     # Inicializar base de datos
     init_database()
+    
+    # Actualizar tiempo restante de todas las keys
+    update_all_time_remaining()
     
     # Iniciar Flask
     port = int(os.getenv('PORT', 8080))
