@@ -29,13 +29,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Inicializar Flask
-app = Flask(__name__)
-
 # Variables globales
 client = None
-client_ready = False
 loop = None
+
+# Crear la aplicación Flask
+app = Flask(__name__)
+
+# Inicializar base de datos
+init_database()
 
 def parse_nm_response(text):
     """Parsea la respuesta del comando /nm"""
@@ -217,8 +219,8 @@ def check_connection():
     return True
 
 def consult_nm_sync(nombres, apellidos, request_id=None):
-    """Consulta síncrona para /nm"""
-    global client_ready, loop
+    """Consulta el NM usando Telethon de forma síncrona."""
+    global client, loop
     
     # Verificar conexión antes de proceder
     if not check_connection():
@@ -231,26 +233,20 @@ def consult_nm_sync(nombres, apellidos, request_id=None):
     if not request_id:
         request_id = str(uuid.uuid4())[:8]
     
-    if not client_ready:
-        return {
-            'success': False,
-            'error': 'Cliente de Telegram no inicializado'
-        }
-    
     try:
-        # Usar asyncio.run_coroutine_threadsafe para ejecutar en el loop existente
+        # Ejecutar la consulta asíncrona en el loop existente
         future = asyncio.run_coroutine_threadsafe(consult_nm_async(nombres, apellidos, request_id), loop)
-        return future.result(timeout=45)  # 45 segundos de timeout
+        result = future.result(timeout=35)  # 35 segundos de timeout
+        return result
         
     except asyncio.TimeoutError:
         logger.error(f"Timeout consultando /nm para {nombres} {apellidos}")
         return {
             'success': False,
-            'error': 'Timeout: No se recibió respuesta en 45 segundos'
+            'error': 'Timeout: No se recibió respuesta en 35 segundos'
         }
     except Exception as e:
-        logger.error(f"[{request_id}] Error en consulta síncrona /nm: {e}")
-        
+        logger.error(f"Error consultando /nm para {nombres} {apellidos}: {str(e)}")
         # Si es un error de Constructor ID, intentar reiniciar la sesión
         if "Constructor ID" in str(e) or "020b1422" in str(e) or "8f97c628" in str(e):
             logger.error("Error de Constructor ID detectado - versión de Telethon incompatible")
@@ -285,7 +281,7 @@ def consult_nm_sync(nombres, apellidos, request_id=None):
                         logger.info("Cliente reconectado exitosamente")
                         # Intentar la consulta nuevamente
                         future = asyncio.run_coroutine_threadsafe(consult_nm_async(nombres, apellidos, request_id), loop)
-                        result = future.result(timeout=45)
+                        result = future.result(timeout=35)
                         return result
                     else:
                         logger.error("No se pudo reconectar el cliente")
@@ -593,8 +589,7 @@ def nm_result():
             'request_id': request_id
         }), 500
 
-# Inicializar Telethon cuando se importa el módulo (para Gunicorn)
-init_telethon()
+# Telethon se inicializa en main() para evitar problemas con Gunicorn
 
 def update_all_time_remaining():
     """Actualiza el tiempo restante de todas las API Keys"""
@@ -633,28 +628,53 @@ def update_all_time_remaining():
     except Exception as e:
         logger.error(f"❌ Error actualizando tiempo restante: {e}")
 
-# Inicializar base de datos de forma asíncrona (no bloquea el inicio)
-import threading
-import time
-
-def init_database_async():
-    """Inicializa la base de datos de forma asíncrona."""
-    try:
-        time.sleep(2)  # Esperar un poco para que el servidor esté listo
-        init_database()
-        logger.info("Base de datos PostgreSQL inicializada")
-        
-        # Actualizar tiempo restante después de inicializar la BD
-        update_all_time_remaining()
-        logger.info("Tiempo restante actualizado")
-    except Exception as e:
-        logger.error(f"Error inicializando base de datos: {e}")
-
-# Iniciar inicialización en background
-threading.Thread(target=init_database_async, daemon=True).start()
+def init_telethon_thread():
+    """Inicializa Telethon en un hilo separado."""
+    global client, loop
+    
+    def run_telethon():
+        global client, loop
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            client = TelegramClient(
+                'telethon_session',
+                config.API_ID,
+                config.API_HASH
+            )
+            
+            # Iniciar el cliente de forma asíncrona
+            async def start_client():
+                await client.start()
+                logger.info("Cliente de Telethon iniciado correctamente")
+            
+            loop.run_until_complete(start_client())
+            
+            # Mantener el loop corriendo
+            loop.run_forever()
+            
+        except Exception as e:
+            logger.error(f"Error inicializando Telethon: {str(e)}")
+    
+    # Iniciar en hilo separado
+    thread = threading.Thread(target=run_telethon, daemon=True)
+    thread.start()
+    
+    # Esperar un poco para que se inicialice
+    time.sleep(3)
 
 def main():
     """Función principal."""
+    # Inicializar base de datos
+    init_database()
+    
+    # Actualizar tiempo restante de todas las keys
+    update_all_time_remaining()
+    
+    # Inicializar Telethon en hilo separado
+    init_telethon_thread()
+    
     # Iniciar Flask
     port = int(os.getenv('PORT', 8080))
     logger.info(f"Iniciando API en puerto {port}")
