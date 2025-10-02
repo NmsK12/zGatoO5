@@ -88,13 +88,10 @@ async def consult_nm_async(nombres, apellidos):
         raise Exception("Cliente de Telegram no inicializado")
     
     try:
-        # Formatear el comando según las reglas
-        if not apellidos or apellidos.strip() == '':
-            # Solo un apellido: /nm NOMBRES| |APELLIDO
-            command = f"/nm {nombres}| |{apellidos}"
-        else:
-            # Múltiples apellidos: /nm NOMBRES|APELLIDO1|APELLIDO2
-            command = f"/nm {nombres}|{apellidos}"
+        # Formatear el comando según las reglas del bot
+        # Formato: /nm NOMBRES|APELLIDO1|APELLIDO2
+        # Nombres separados por comas, apellidos separados por |
+        command = f"/nm {nombres}|{apellidos}"
         
         logger.info(f"Enviando comando: {command}")
         
