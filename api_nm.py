@@ -199,14 +199,14 @@ async def consult_nm_async(nombres, apellidos, request_id):
 
 def check_connection():
     """Verifica si el cliente está conectado y lo reconecta si es necesario."""
-    global client, client_ready, loop
+    global client, loop
     
     if not client:
         logger.warning("Cliente no inicializado, reiniciando...")
         restart_telethon()
         return False
     
-    if not client_ready or not client.is_connected():
+    if not client.is_connected():
         logger.warning("Cliente desconectado, reconectando...")
         try:
             restart_telethon()
@@ -227,6 +227,14 @@ def consult_nm_sync(nombres, apellidos, request_id=None):
         return {
             'success': False,
             'error': 'Cliente de Telegram no disponible. Intenta en unos segundos.'
+        }
+    
+    # Verificar que el loop esté disponible
+    if not loop:
+        logger.error("Loop de asyncio no disponible")
+        return {
+            'success': False,
+            'error': 'Servicio no está completamente inicializado. Intenta en unos segundos.'
         }
     
     # Generar request_id único si no se proporciona
@@ -309,7 +317,7 @@ def consult_nm_sync(nombres, apellidos, request_id=None):
 
 def restart_telethon():
     """Reinicia la conexión de Telethon"""
-    global client, client_ready
+    global client, loop
     
     try:
         logger.info("Reiniciando conexión de Telethon...")
@@ -317,10 +325,11 @@ def restart_telethon():
         if client:
             # Desconectar cliente existente
             try:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(client.disconnect())
-                loop.close()
+                if loop and loop.is_running():
+                    future = asyncio.run_coroutine_threadsafe(client.disconnect(), loop)
+                    future.result(timeout=5)
+                else:
+                    client.disconnect()
             except:
                 pass
         
@@ -333,14 +342,13 @@ def restart_telethon():
         
         # Inicializar en hilo separado
         def run_telethon():
+            global client, loop
             try:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 
                 async def start_client():
-                    global client_ready
                     await client.start()
-                    client_ready = True
                     logger.info("Cliente de Telethon reiniciado correctamente")
                 
                 loop.run_until_complete(start_client())
@@ -348,7 +356,6 @@ def restart_telethon():
                 
             except Exception as e:
                 logger.error(f"Error reiniciando Telethon: {e}")
-                client_ready = False
         
         thread = threading.Thread(target=run_telethon, daemon=True)
         thread.start()
