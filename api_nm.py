@@ -150,11 +150,11 @@ def consult_nm_sync(nombres, apellidos):
         raise Exception("Cliente de Telegram no inicializado")
     
     try:
-        # Ejecutar consulta asíncrona
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(consult_nm_async(nombres, apellidos))
-        loop.close()
+        # Usar el event loop existente del hilo de Telethon
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(lambda: asyncio.run(consult_nm_async(nombres, apellidos)))
+            result = future.result(timeout=60)
         return result
         
     except Exception as e:
