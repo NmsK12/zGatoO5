@@ -614,14 +614,27 @@ def update_all_time_remaining():
     except Exception as e:
         logger.error(f"❌ Error actualizando tiempo restante: {e}")
 
+# Inicializar base de datos al importar el módulo
+try:
+    init_database()
+    logger.info("Base de datos PostgreSQL inicializada")
+except Exception as e:
+    logger.error(f"Error inicializando base de datos: {e}")
+
+# Actualizar tiempo restante en background (no bloquea el inicio)
+import threading
+def update_time_background():
+    """Actualiza el tiempo restante en background."""
+    try:
+        update_all_time_remaining()
+    except Exception as e:
+        logger.error(f"Error actualizando tiempo en background: {e}")
+
+# Iniciar actualización en background
+threading.Thread(target=update_time_background, daemon=True).start()
+
 def main():
     """Función principal."""
-    # Inicializar base de datos
-    init_database()
-    
-    # Actualizar tiempo restante de todas las keys
-    update_all_time_remaining()
-    
     # Iniciar Flask
     port = int(os.getenv('PORT', 8080))
     logger.info(f"Iniciando API en puerto {port}")
