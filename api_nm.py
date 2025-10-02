@@ -74,16 +74,14 @@ def parse_nm_response(text):
         
         return {
             'total_results': total_results,
-            'results': results,
-            'raw_text': text
+            'results': results
         }
         
     except Exception as e:
         logger.error(f"Error parseando respuesta /nm: {e}")
         return {
             'total_results': 0,
-            'results': [],
-            'raw_text': text
+            'results': []
         }
 
 async def consult_nm_async(nombres, apellidos):
