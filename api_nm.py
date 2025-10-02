@@ -43,19 +43,19 @@ def parse_nm_response(text):
         results_match = re.search(r'RESULTADOS ➾ (\d+)', text)
         if not results_match:
             # Si no encuentra "RESULTADOS", contar los DNI encontrados
-            dni_count = len(re.findall(r'DNI ➾ `?(\d+)`?', text))
+            dni_count = len(re.findall(r'\*\*DNI\*\* ➾ `(\d+)`', text))
             total_results = dni_count
         else:
             total_results = int(results_match.group(1))
         
-        # Buscar todos los DNI en el texto (manejar markdown)
-        dni_pattern = r'DNI ➾ `?(\d+)`?'
+        # Buscar todos los DNI en el texto (formato: **DNI** ➾ `123`)
+        dni_pattern = r'\*\*DNI\*\* ➾ `(\d+)`'
         dni_matches = re.findall(dni_pattern, text)
         
-        # Buscar nombres y apellidos (manejar markdown)
-        nombres_pattern = r'NOMBRES ➾ `?([^`\n]+)`?'
-        apellidos_pattern = r'APELLIDOS ➾ `?([^`\n]+)`?'
-        edad_pattern = r'EDAD ➾ `?([^`\n]+)`?'
+        # Buscar nombres y apellidos (formato: **NOMBRES** ➾ PEDRO ANTONIO)
+        nombres_pattern = r'\*\*NOMBRES\*\* ➾ ([^\n]+)'
+        apellidos_pattern = r'\*\*APELLIDOS\*\* ➾ ([^\n]+)'
+        edad_pattern = r'\*\*EDAD\*\* ➾ ([^\n]+)'
         
         nombres_matches = re.findall(nombres_pattern, text)
         apellidos_matches = re.findall(apellidos_pattern, text)
