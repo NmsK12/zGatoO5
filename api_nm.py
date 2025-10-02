@@ -9,6 +9,7 @@ import os
 import re
 import threading
 import time
+import uuid
 from datetime import datetime, timedelta
 from io import BytesIO
 
@@ -84,7 +85,7 @@ def parse_nm_response(text):
             'results': []
         }
 
-async def consult_nm_async(nombres, apellidos):
+async def consult_nm_async(nombres, apellidos, request_id):
     """Consulta asíncrona para /nm"""
     global client, client_ready
     
@@ -92,12 +93,12 @@ async def consult_nm_async(nombres, apellidos):
         raise Exception("Cliente de Telegram no inicializado")
     
     try:
-        # Formatear el comando según las reglas del bot
+        # Formatear el comando según las reglas del bot (sin request_id visible)
         # Formato: /nm NOMBRES|APELLIDO1|APELLIDO2
         # Nombres separados por comas, apellidos separados por |
         command = f"/nm {nombres}|{apellidos}"
         
-        logger.info(f"Enviando comando: {command}")
+        logger.info(f"[{request_id}] Enviando comando: {command}")
         
         # Enviar comando
         await client.send_message(config.TARGET_BOT, command)
@@ -126,7 +127,7 @@ async def consult_nm_async(nombres, apellidos):
                     # Filtrar mensajes de carga
                     if 'Estamos procesando tu solicitud' not in message.text:
                         bot_responses.append(message.text)
-                        logger.info(f"Respuesta del bot detectada: {message.text[:100]}...")
+                        logger.info(f"[{request_id}] Respuesta del bot detectada: {message.text[:100]}...")
                 elif message.media and isinstance(message.media, MessageMediaDocument):
                     # Es un archivo .txt
                     try:
@@ -134,9 +135,9 @@ async def consult_nm_async(nombres, apellidos):
                         file_content.seek(0)
                         txt_content = file_content.read().decode('utf-8', errors='ignore')
                         bot_responses.append(txt_content)
-                        logger.info(f"Archivo .txt descargado y procesado: {len(txt_content)} caracteres")
+                        logger.info(f"[{request_id}] Archivo .txt descargado y procesado: {len(txt_content)} caracteres")
                     except Exception as e:
-                        logger.error(f"Error descargando archivo .txt: {e}")
+                        logger.error(f"[{request_id}] Error descargando archivo .txt: {e}")
                 elif message.media and hasattr(message.media, 'photo'):
                     # Es una foto - verificar que no sea del mensaje de carga
                     try:
@@ -152,16 +153,16 @@ async def consult_nm_async(nombres, apellidos):
                                 photo_bytes.seek(0)
                                 photo_base64 = base64.b64encode(photo_bytes.getvalue()).decode('utf-8')
                                 photos_data[f"foto_{dni}"] = f"data:image/jpeg;base64,{photo_base64}"
-                                logger.info(f"Foto extraída para DNI {dni}")
+                                logger.info(f"[{request_id}] Foto extraída para DNI {dni}")
                             else:
-                                logger.info("Foto detectada pero sin DNI asociado - ignorando")
+                                logger.info(f"[{request_id}] Foto detectada pero sin DNI asociado - ignorando")
                         else:
-                            logger.info("Foto detectada pero sin texto de DNI - ignorando")
+                            logger.info(f"[{request_id}] Foto detectada pero sin texto de DNI - ignorando")
                     except Exception as e:
-                        logger.error(f"Error extrayendo foto: {e}")
+                        logger.error(f"[{request_id}] Error extrayendo foto: {e}")
         
         if not bot_responses:
-            raise Exception("No se recibió respuesta del bot")
+            raise Exception(f"[{request_id}] No se recibió respuesta del bot")
         
         # Combinar todas las respuestas
         combined_text = '\n'.join(bot_responses)
@@ -173,26 +174,130 @@ async def consult_nm_async(nombres, apellidos):
         if photos_data:
             parsed_data['fotos'] = photos_data
         
+        # Agregar request_id a la respuesta
+        parsed_data['request_id'] = request_id
+        
         return parsed_data
         
     except Exception as e:
-        logger.error(f"Error en consulta /nm: {e}")
+        logger.error(f"[{request_id}] Error en consulta /nm: {e}")
         raise
 
-def consult_nm_sync(nombres, apellidos):
+def check_connection():
+    """Verifica si el cliente está conectado y lo reconecta si es necesario."""
+    global client, client_ready, loop
+    
+    if not client:
+        logger.warning("Cliente no inicializado, reiniciando...")
+        restart_telethon()
+        return False
+    
+    if not client_ready or not client.is_connected():
+        logger.warning("Cliente desconectado, reconectando...")
+        try:
+            restart_telethon()
+            time.sleep(3)
+            return client and client.is_connected()
+        except Exception as e:
+            logger.error(f"Error reconectando: {str(e)}")
+            return False
+    
+    return True
+
+def consult_nm_sync(nombres, apellidos, request_id=None):
     """Consulta síncrona para /nm"""
     global client_ready, loop
     
+    # Verificar conexión antes de proceder
+    if not check_connection():
+        return {
+            'success': False,
+            'error': 'Cliente de Telegram no disponible. Intenta en unos segundos.'
+        }
+    
+    # Generar request_id único si no se proporciona
+    if not request_id:
+        request_id = str(uuid.uuid4())[:8]
+    
     if not client_ready:
-        raise Exception("Cliente de Telegram no inicializado")
+        return {
+            'success': False,
+            'error': 'Cliente de Telegram no inicializado'
+        }
     
     try:
-        # Usar el loop global existente
-        return loop.run_until_complete(consult_nm_async(nombres, apellidos))
+        # Usar asyncio.run_coroutine_threadsafe para ejecutar en el loop existente
+        future = asyncio.run_coroutine_threadsafe(consult_nm_async(nombres, apellidos, request_id), loop)
+        return future.result(timeout=60)  # 60 segundos de timeout
         
+    except asyncio.TimeoutError:
+        logger.error(f"Timeout consultando /nm para {nombres} {apellidos}")
+        return {
+            'success': False,
+            'error': 'Timeout: No se recibió respuesta en 60 segundos'
+        }
     except Exception as e:
-        logger.error(f"Error en consulta síncrona /nm: {e}")
-        raise
+        logger.error(f"[{request_id}] Error en consulta síncrona /nm: {e}")
+        
+        # Si es un error de Constructor ID, intentar reiniciar la sesión
+        if "Constructor ID" in str(e) or "020b1422" in str(e) or "8f97c628" in str(e):
+            logger.error("Error de Constructor ID detectado - versión de Telethon incompatible")
+            logger.info("Intentando reiniciar sesión...")
+            restart_telethon()
+            return {
+                'success': False,
+                'error': 'Error de compatibilidad detectado. Intenta nuevamente en unos segundos.'
+            }
+        
+        # Si es un error de sesión usada en múltiples IPs
+        if "authorization key" in str(e) and "two different IP addresses" in str(e):
+            logger.error("Sesión usada en múltiples IPs. Detén el proceso local y usa solo en contenedor.")
+            return {
+                'success': False,
+                'error': 'Sesión en conflicto. Detén el proceso local y usa solo en contenedor.'
+            }
+        
+        # Si es error de desconexión, intentar reconectar
+        if "disconnected" in str(e).lower() or "connection" in str(e).lower() or "Cannot send requests while disconnected" in str(e):
+            logger.info("Error de desconexión detectado, intentando reconectar...")
+            try:
+                # Verificar si el cliente está conectado
+                if client and not client.is_connected():
+                    logger.info("Cliente desconectado, reiniciando...")
+                    restart_telethon()
+                    # Esperar un poco para que se reconecte
+                    time.sleep(5)
+                    
+                    # Verificar que se reconectó correctamente
+                    if client and client.is_connected():
+                        logger.info("Cliente reconectado exitosamente")
+                        # Intentar la consulta nuevamente
+                        future = asyncio.run_coroutine_threadsafe(consult_nm_async(nombres, apellidos, request_id), loop)
+                        result = future.result(timeout=60)
+                        return result
+                    else:
+                        logger.error("No se pudo reconectar el cliente")
+                        return {
+                            'success': False,
+                            'error': 'Error de conexión. El servicio se está reiniciando, intenta en unos segundos.'
+                        }
+                else:
+                    logger.error("Cliente no disponible para reconexión")
+                    return {
+                        'success': False,
+                        'error': 'Error de conexión. El servicio no está disponible.'
+                    }
+            except Exception as retry_error:
+                logger.error(f"Error en reintento: {str(retry_error)}")
+                return {
+                    'success': False,
+                    'error': 'Error de conexión. Intenta nuevamente en unos segundos.'
+                }
+        
+        return {
+            'success': False,
+            'error': f'Error en la consulta: {str(e)}'
+        }
 
 def restart_telethon():
     """Reinicia la conexión de Telethon"""
@@ -312,11 +417,33 @@ def home():
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint."""
-    return jsonify({
-        'status': 'OK',
-        'service': 'Búsqueda por Nombres API',
-        'timestamp': datetime.now().isoformat()
-    })
+    global client, client_ready
+    
+    try:
+        # Verificar estado del cliente
+        client_status = "connected" if client and client.is_connected() and client_ready else "disconnected"
+        
+        # Verificar base de datos
+        db_status = "ok"
+        try:
+            init_database()
+        except Exception as e:
+            db_status = f"error: {str(e)}"
+        
+        return jsonify({
+            'service': 'Búsqueda por Nombres API',
+            'status': 'healthy' if client_status == "connected" and db_status == "ok" else 'unhealthy',
+            'telegram_client': client_status,
+            'database': db_status,
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({
+            'service': 'Búsqueda por Nombres API',
+            'status': 'unhealthy',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
 
 @app.route('/register-key', methods=['POST'])
 def register_key():
@@ -405,9 +532,12 @@ def nm_result():
             'error': 'Parámetro nombres es requerido'
         }), 400
     
+    # Generar request_id único para esta consulta
+    request_id = str(uuid.uuid4())[:8]
+    
     try:
         # Realizar consulta
-        result = consult_nm_sync(nombres, apellidos)
+        result = consult_nm_sync(nombres, apellidos, request_id)
         
         return jsonify({
             'success': True,
@@ -415,24 +545,25 @@ def nm_result():
         })
         
     except Exception as e:
-        logger.error(f"Error consultando /nm: {e}")
+        logger.error(f"[{request_id}] Error consultando /nm: {e}")
         
         # Intentar reiniciar Telethon si hay error de conexión
         if "disconnected" in str(e).lower() or "connection" in str(e).lower():
             try:
                 restart_telethon()
                 # Reintentar una vez
-                result = consult_nm_sync(nombres, apellidos)
+                result = consult_nm_sync(nombres, apellidos, request_id)
                 return jsonify({
                     'success': True,
                     'data': result
                 })
             except Exception as retry_error:
-                logger.error(f"Error en reintento: {retry_error}")
+                logger.error(f"[{request_id}] Error en reintento: {retry_error}")
         
         return jsonify({
             'success': False,
-            'error': f'Error en la consulta: {str(e)}'
+            'error': f'Error en la consulta: {str(e)}',
+            'request_id': request_id
         }), 500
 
 # Inicializar Telethon cuando se importa el módulo (para Gunicorn)
