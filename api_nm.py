@@ -89,9 +89,9 @@ def parse_nm_response(text):
 
 async def consult_nm_async(nombres, apellidos, request_id):
     """Consulta asíncrona para /nm"""
-    global client, client_ready
+    global client
     
-    if not client_ready:
+    if not client or not client.is_connected():
         raise Exception("Cliente de Telegram no inicializado")
     
     try:
@@ -365,11 +365,10 @@ def restart_telethon():
         
     except Exception as e:
         logger.error(f"Error en restart_telethon: {e}")
-        client_ready = False
 
 def init_telethon():
     """Inicializa Telethon con un event loop global"""
-    global client, client_ready, loop
+    global client, loop
     
     try:
         # Crear event loop global
@@ -389,18 +388,14 @@ def init_telethon():
         
     except Exception as e:
         logger.error(f"Error inicializando Telethon: {e}")
-        client_ready = False
 
 async def start_client():
     """Inicia el cliente de Telegram"""
-    global client_ready
     try:
         await client.start()
-        client_ready = True
         logger.info("Cliente de Telethon iniciado correctamente")
     except Exception as e:
         logger.error(f"Error iniciando cliente: {e}")
-        client_ready = False
 
 # Rutas de la API
 @app.route('/', methods=['GET'])
@@ -432,11 +427,11 @@ def home():
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint."""
-    global client, client_ready
+    global client
     
     try:
         # Verificar estado del cliente
-        client_status = "connected" if client and client.is_connected() and client_ready else "disconnected"
+        client_status = "connected" if client and client.is_connected() else "disconnected"
         
         return jsonify({
             'service': 'Búsqueda por Nombres API',
