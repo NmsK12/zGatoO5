@@ -1,7 +1,7 @@
 *.pyc
 __pycache__/
 *.db
-*.session
+# *.session  # Temporalmente comentado para subir a Railway
 .env
 .DS_Store
 *.log
