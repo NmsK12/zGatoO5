@@ -132,10 +132,14 @@ async def consult_nm_async(nombres, apellidos, request_id):
             if (message.date.timestamp() > command_time - 60 and is_from_bot):
                 
                 if message.text and ('RENIEC X NOMBRES' in message.text or 'RESULTADOS' in message.text or 'DNI ➾' in message.text or 'Ahora puedes previsualizar' in message.text):
-                    # Filtrar mensajes de carga
-                    if 'Estamos procesando tu solicitud' not in message.text:
+                    # Filtrar mensajes de carga y procesamiento
+                    if ('Estamos procesando tu solicitud' not in message.text and 
+                        '[⏳]' not in message.text and
+                        'Un momento por favor' not in message.text):
                         bot_responses.append(message.text)
                         logger.info(f"[{request_id}] Respuesta del bot detectada: {message.text[:100]}...")
+                    else:
+                        logger.info(f"[{request_id}] Mensaje de procesamiento ignorado: {message.text[:50]}...")
                 elif message.media and isinstance(message.media, MessageMediaDocument):
                     # Es un archivo .txt
                     try:
@@ -431,18 +435,11 @@ def health():
         # Verificar estado del cliente
         client_status = "connected" if client and client.is_connected() and client_ready else "disconnected"
         
-        # Verificar base de datos
-        db_status = "ok"
-        try:
-            init_database()
-        except Exception as e:
-            db_status = f"error: {str(e)}"
-        
         return jsonify({
             'service': 'Búsqueda por Nombres API',
-            'status': 'healthy' if client_status == "connected" and db_status == "ok" else 'unhealthy',
+            'status': 'healthy' if client_status == "connected" else 'unhealthy',
             'telegram_client': client_status,
-            'database': db_status,
+            'database': 'initializing',  # No verificar BD para evitar timeouts
             'timestamp': datetime.now().isoformat()
         })
     except Exception as e:
@@ -517,6 +514,9 @@ def delete_key():
             'error': f'Error interno: {str(e)}'
         }), 500
 
+# Diccionario para almacenar resultados temporalmente
+pending_results = {}
+
 @app.route('/nm', methods=['GET'])
 def nm_result():
     """Endpoint para búsqueda por nombres."""
@@ -543,34 +543,83 @@ def nm_result():
     # Generar request_id único para esta consulta
     request_id = str(uuid.uuid4())[:8]
     
+    # Enviar comando al bot de forma asíncrona
     try:
-        # Realizar consulta
-        result = consult_nm_sync(nombres, apellidos, request_id)
+        # Ejecutar en background
+        def send_command_async():
+            try:
+                result = consult_nm_sync(nombres, apellidos, request_id)
+                pending_results[request_id] = result
+                logger.info(f"[{request_id}] Resultado guardado: {result.get('success', False)}")
+            except Exception as e:
+                pending_results[request_id] = {
+                    'success': False,
+                    'error': str(e)
+                }
+                logger.error(f"[{request_id}] Error en background: {e}")
         
+        threading.Thread(target=send_command_async, daemon=True).start()
+        
+        # Devolver respuesta inmediata
         return jsonify({
             'success': True,
-            'data': result
+            'status': 'enviado',
+            'nombres': nombres,
+            'apellidos': apellidos,
+            'request_id': request_id,
+            'message': 'Comando enviado al bot. Usa /resultado para obtener la respuesta.',
+            'resultado_url': f'/resultado?request_id={request_id}',
+            'timestamp': datetime.now().isoformat()
         })
         
     except Exception as e:
-        logger.error(f"[{request_id}] Error consultando /nm: {e}")
+        logger.error(f"[{request_id}] Error enviando comando: {e}")
+        return jsonify({
+            'success': False,
+            'error': f'Error enviando comando: {str(e)}',
+            'request_id': request_id
+        }), 500
+
+@app.route('/resultado', methods=['GET'])
+def resultado():
+    """Endpoint para obtener el resultado de una consulta."""
+    request_id = request.args.get('request_id')
+    
+    if not request_id:
+        return jsonify({
+            'success': False,
+            'error': 'Parámetro request_id requerido'
+        }), 400
+    
+    if request_id not in pending_results:
+        return jsonify({
+            'success': False,
+            'error': 'Request ID no encontrado o aún procesando',
+            'status': 'processing',
+            'message': 'La consulta aún está siendo procesada. Intenta en unos segundos.'
+        }), 202
+    
+    result = pending_results[request_id]
+    
+    if result['success']:
+        response = {
+            'success': True,
+            'request_id': request_id,
+            'data': result.get('parsed_data', {}),
+            'timestamp': datetime.now().isoformat()
+        }
         
-        # Intentar reiniciar Telethon si hay error de conexión
-        if "disconnected" in str(e).lower() or "connection" in str(e).lower():
-            try:
-                restart_telethon()
-                # Reintentar una vez
-                result = consult_nm_sync(nombres, apellidos, request_id)
-                return jsonify({
-                    'success': True,
-                    'data': result
-                })
-            except Exception as retry_error:
-                logger.error(f"[{request_id}] Error en reintento: {retry_error}")
+        # Limpiar resultado después de devolverlo
+        del pending_results[request_id]
+        
+        return jsonify(response)
+    else:
+        # Limpiar resultado de error también
+        del pending_results[request_id]
         
         return jsonify({
             'success': False,
-            'error': f'Error en la consulta: {str(e)}',
+            'error': result['error'],
             'request_id': request_id
         }), 500
 
@@ -614,24 +663,25 @@ def update_all_time_remaining():
     except Exception as e:
         logger.error(f"❌ Error actualizando tiempo restante: {e}")
 
-# Inicializar base de datos al importar el módulo
-try:
-    init_database()
-    logger.info("Base de datos PostgreSQL inicializada")
-except Exception as e:
-    logger.error(f"Error inicializando base de datos: {e}")
-
-# Actualizar tiempo restante en background (no bloquea el inicio)
+# Inicializar base de datos de forma asíncrona (no bloquea el inicio)
 import threading
-def update_time_background():
-    """Actualiza el tiempo restante en background."""
-    try:
-        update_all_time_remaining()
-    except Exception as e:
-        logger.error(f"Error actualizando tiempo en background: {e}")
+import time
 
-# Iniciar actualización en background
-threading.Thread(target=update_time_background, daemon=True).start()
+def init_database_async():
+    """Inicializa la base de datos de forma asíncrona."""
+    try:
+        time.sleep(2)  # Esperar un poco para que el servidor esté listo
+        init_database()
+        logger.info("Base de datos PostgreSQL inicializada")
+        
+        # Actualizar tiempo restante después de inicializar la BD
+        update_all_time_remaining()
+        logger.info("Tiempo restante actualizado")
+    except Exception as e:
+        logger.error(f"Error inicializando base de datos: {e}")
+
+# Iniciar inicialización en background
+threading.Thread(target=init_database_async, daemon=True).start()
 
 def main():
     """Función principal."""
