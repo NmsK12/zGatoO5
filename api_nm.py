@@ -228,13 +228,13 @@ def consult_nm_sync(nombres, apellidos, request_id=None):
     try:
         # Usar asyncio.run_coroutine_threadsafe para ejecutar en el loop existente
         future = asyncio.run_coroutine_threadsafe(consult_nm_async(nombres, apellidos, request_id), loop)
-        return future.result(timeout=60)  # 60 segundos de timeout
+        return future.result(timeout=45)  # 45 segundos de timeout
         
     except asyncio.TimeoutError:
         logger.error(f"Timeout consultando /nm para {nombres} {apellidos}")
         return {
             'success': False,
-            'error': 'Timeout: No se recibió respuesta en 60 segundos'
+            'error': 'Timeout: No se recibió respuesta en 45 segundos'
         }
     except Exception as e:
         logger.error(f"[{request_id}] Error en consulta síncrona /nm: {e}")
@@ -273,7 +273,7 @@ def consult_nm_sync(nombres, apellidos, request_id=None):
                         logger.info("Cliente reconectado exitosamente")
                         # Intentar la consulta nuevamente
                         future = asyncio.run_coroutine_threadsafe(consult_nm_async(nombres, apellidos, request_id), loop)
-                        result = future.result(timeout=60)
+                        result = future.result(timeout=45)
                         return result
                     else:
                         logger.error("No se pudo reconectar el cliente")
