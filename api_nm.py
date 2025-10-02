@@ -144,18 +144,44 @@ async def consult_nm_async(nombres, apellidos):
 
 def consult_nm_sync(nombres, apellidos):
     """Consulta síncrona para /nm"""
-    global client_ready
+    global client_ready, client
     
     if not client_ready:
         raise Exception("Cliente de Telegram no inicializado")
     
     try:
-        # Usar el event loop existente del hilo de Telethon
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(lambda: asyncio.run(consult_nm_async(nombres, apellidos)))
-            result = future.result(timeout=60)
-        return result
+        # Usar el cliente directamente sin crear nuevos event loops
+        import threading
+        import queue
+        
+        result_queue = queue.Queue()
+        exception_queue = queue.Queue()
+        
+        def run_async():
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                result = loop.run_until_complete(consult_nm_async(nombres, apellidos))
+                result_queue.put(result)
+                loop.close()
+            except Exception as e:
+                exception_queue.put(e)
+        
+        # Ejecutar en hilo separado
+        thread = threading.Thread(target=run_async)
+        thread.start()
+        thread.join(timeout=60)
+        
+        if thread.is_alive():
+            raise Exception("Timeout en consulta")
+        
+        if not exception_queue.empty():
+            raise exception_queue.get()
+        
+        if not result_queue.empty():
+            return result_queue.get()
+        else:
+            raise Exception("No se obtuvo resultado")
         
     except Exception as e:
         logger.error(f"Error en consulta síncrona /nm: {e}")
