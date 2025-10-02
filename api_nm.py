@@ -39,15 +39,20 @@ loop = None
 def parse_nm_response(text):
     """Parsea la respuesta del comando /nm"""
     try:
-        # Buscar la línea de resultados
+        # Buscar la línea de resultados (puede estar en diferentes formatos)
         results_match = re.search(r'RESULTADOS ➾ (\d+)', text)
-        total_results = int(results_match.group(1)) if results_match else 0
+        if not results_match:
+            # Si no encuentra "RESULTADOS", contar los DNI encontrados
+            dni_count = len(re.findall(r'DNI ➾ (\d+)', text))
+            total_results = dni_count
+        else:
+            total_results = int(results_match.group(1))
         
-        # Buscar todos los DNI en el texto
+        # Buscar todos los DNI en el texto (formato simple)
         dni_pattern = r'DNI ➾ (\d+)'
         dni_matches = re.findall(dni_pattern, text)
         
-        # Buscar nombres y apellidos
+        # Buscar nombres y apellidos (formato simple)
         nombres_pattern = r'NOMBRES ➾ ([^\n]+)'
         apellidos_pattern = r'APELLIDOS ➾ ([^\n]+)'
         edad_pattern = r'EDAD ➾ ([^\n]+)'
@@ -120,8 +125,10 @@ async def consult_nm_async(nombres, apellidos):
             if (message.date.timestamp() > command_time - 60 and is_from_bot):
                 
                 if message.text and ('RENIEC X NOMBRES' in message.text or 'RESULTADOS' in message.text or 'DNI ➾' in message.text or 'Ahora puedes previsualizar' in message.text):
-                    bot_responses.append(message.text)
-                    logger.info(f"Respuesta del bot detectada: {message.text[:100]}...")
+                    # Filtrar mensajes de carga
+                    if 'Estamos procesando tu solicitud' not in message.text:
+                        bot_responses.append(message.text)
+                        logger.info(f"Respuesta del bot detectada: {message.text[:100]}...")
                 elif message.media and isinstance(message.media, MessageMediaDocument):
                     # Es un archivo .txt
                     try:
@@ -133,34 +140,25 @@ async def consult_nm_async(nombres, apellidos):
                     except Exception as e:
                         logger.error(f"Error descargando archivo .txt: {e}")
                 elif message.media and hasattr(message.media, 'photo'):
-                    # Es una foto - extraer DNI del mensaje si es posible
+                    # Es una foto - verificar que no sea del mensaje de carga
                     try:
-                        # Buscar DNI en el texto del mensaje o en mensajes anteriores
-                        dni_match = re.search(r'DNI ➾ (\d+)', message.text or '')
-                        if not dni_match:
-                            # Buscar en mensajes anteriores
-                            for prev_msg in messages:
-                                if prev_msg.text and 'DNI ➾' in prev_msg.text:
-                                    dni_match = re.search(r'DNI ➾ (\d+)', prev_msg.text)
-                                    if dni_match:
-                                        break
-                        
-                        if dni_match:
-                            dni = dni_match.group(1)
-                            # Descargar foto y convertir a base64
-                            photo_bytes = await client.download_media(message.media, file=BytesIO())
-                            photo_bytes.seek(0)
-                            photo_base64 = base64.b64encode(photo_bytes.getvalue()).decode('utf-8')
-                            photos_data[f"foto_{dni}"] = f"data:image/jpeg;base64,{photo_base64}"
-                            logger.info(f"Foto extraída para DNI {dni}")
+                        # Solo procesar fotos si hay texto asociado con DNI
+                        if message.text and 'DNI ➾' in message.text:
+                            # Buscar DNI en el texto del mensaje
+                            dni_match = re.search(r'DNI ➾ (\d+)', message.text)
+                            
+                            if dni_match:
+                                dni = dni_match.group(1)
+                                # Descargar foto y convertir a base64
+                                photo_bytes = await client.download_media(message.media, file=BytesIO())
+                                photo_bytes.seek(0)
+                                photo_base64 = base64.b64encode(photo_bytes.getvalue()).decode('utf-8')
+                                photos_data[f"foto_{dni}"] = f"data:image/jpeg;base64,{photo_base64}"
+                                logger.info(f"Foto extraída para DNI {dni}")
+                            else:
+                                logger.info("Foto detectada pero sin DNI asociado - ignorando")
                         else:
-                            # Si no encontramos DNI específico, usar timestamp como identificador
-                            timestamp = int(message.date.timestamp())
-                            photo_bytes = await client.download_media(message.media, file=BytesIO())
-                            photo_bytes.seek(0)
-                            photo_base64 = base64.b64encode(photo_bytes.getvalue()).decode('utf-8')
-                            photos_data[f"foto_{timestamp}"] = f"data:image/jpeg;base64,{photo_base64}"
-                            logger.info(f"Foto extraída con timestamp {timestamp}")
+                            logger.info("Foto detectada pero sin texto de DNI - ignorando")
                     except Exception as e:
                         logger.error(f"Error extrayendo foto: {e}")
         
