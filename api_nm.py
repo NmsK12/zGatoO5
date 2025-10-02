@@ -33,6 +33,7 @@ app = Flask(__name__)
 # Variables globales
 client = None
 client_ready = False
+loop = None
 
 def parse_nm_response(text):
     """Parsea la respuesta del comando /nm"""
@@ -144,44 +145,14 @@ async def consult_nm_async(nombres, apellidos):
 
 def consult_nm_sync(nombres, apellidos):
     """Consulta síncrona para /nm"""
-    global client_ready, client
+    global client_ready, loop
     
     if not client_ready:
         raise Exception("Cliente de Telegram no inicializado")
     
     try:
-        # Usar el cliente directamente sin crear nuevos event loops
-        import threading
-        import queue
-        
-        result_queue = queue.Queue()
-        exception_queue = queue.Queue()
-        
-        def run_async():
-            try:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                result = loop.run_until_complete(consult_nm_async(nombres, apellidos))
-                result_queue.put(result)
-                loop.close()
-            except Exception as e:
-                exception_queue.put(e)
-        
-        # Ejecutar en hilo separado
-        thread = threading.Thread(target=run_async)
-        thread.start()
-        thread.join(timeout=60)
-        
-        if thread.is_alive():
-            raise Exception("Timeout en consulta")
-        
-        if not exception_queue.empty():
-            raise exception_queue.get()
-        
-        if not result_queue.empty():
-            return result_queue.get()
-        else:
-            raise Exception("No se obtuvo resultado")
+        # Usar el loop global existente
+        return loop.run_until_complete(consult_nm_async(nombres, apellidos))
         
     except Exception as e:
         logger.error(f"Error en consulta síncrona /nm: {e}")
@@ -240,44 +211,40 @@ def restart_telethon():
         logger.error(f"Error en restart_telethon: {e}")
         client_ready = False
 
-def init_telethon_thread():
-    """Inicializa Telethon en un hilo separado"""
-    global client, client_ready
+def init_telethon():
+    """Inicializa Telethon con un event loop global"""
+    global client, client_ready, loop
     
     try:
+        # Crear event loop global
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        # Crear cliente con el loop global
         client = TelegramClient(
             config.SESSION_NAME,
             config.API_ID,
-            config.API_HASH
+            config.API_HASH,
+            loop=loop
         )
         
-        def run_telethon():
-            try:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-                async def start_client():
-                    global client_ready
-                    await client.start()
-                    client_ready = True
-                    logger.info("Cliente de Telethon iniciado correctamente")
-                
-                loop.run_until_complete(start_client())
-                loop.run_forever()
-                
-            except Exception as e:
-                logger.error(f"Error inicializando Telethon: {e}")
-                client_ready = False
-        
-        # Iniciar en hilo separado
-        thread = threading.Thread(target=run_telethon, daemon=True)
-        thread.start()
-        
-        # Esperar un poco para que se inicialice
-        time.sleep(3)
+        # Inicializar cliente
+        loop.run_until_complete(start_client())
         
     except Exception as e:
-        logger.error(f"Error inicializando Telethon: {str(e)}")
+        logger.error(f"Error inicializando Telethon: {e}")
+        client_ready = False
+
+async def start_client():
+    """Inicia el cliente de Telegram"""
+    global client_ready
+    try:
+        await client.start()
+        client_ready = True
+        logger.info("Cliente de Telethon iniciado correctamente")
+    except Exception as e:
+        logger.error(f"Error iniciando cliente: {e}")
+        client_ready = False
 
 # Rutas de la API
 @app.route('/', methods=['GET'])
@@ -416,7 +383,7 @@ def nm_result():
         }), 500
 
 # Inicializar Telethon cuando se importa el módulo (para Gunicorn)
-init_telethon_thread()
+init_telethon()
 
 def update_all_time_remaining():
     """Actualiza el tiempo restante de todas las API Keys"""
