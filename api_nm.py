@@ -3,6 +3,7 @@
 API para búsqueda por nombres (/nm) - WolfData
 """
 import asyncio
+import base64
 import logging
 import os
 import re
@@ -102,18 +103,25 @@ async def consult_nm_async(nombres, apellidos):
         # Esperar respuestas
         await asyncio.sleep(5)
         
-        # Obtener mensajes recientes
-        messages = await client.get_messages(config.TARGET_BOT, limit=10)
+        # Obtener mensajes recientes (más mensajes para capturar fotos)
+        messages = await client.get_messages(config.TARGET_BOT, limit=20)
         
         # Buscar respuestas del bot
         bot_responses = []
+        photos_data = {}
+        
         for message in messages:
-            if (message.date.timestamp() > command_time - 60 and 
-                message.from_id and 
-                str(message.from_id) == config.TARGET_BOT_ID):
+            # Verificar que sea del bot (from_id puede ser None o el ID del bot)
+            is_from_bot = (
+                (message.from_id and str(message.from_id) == config.TARGET_BOT_ID) or
+                message.from_id is None  # Algunos mensajes del bot tienen from_id None
+            )
+            
+            if (message.date.timestamp() > command_time - 60 and is_from_bot):
                 
-                if message.text and ('RENIEC X NOMBRES' in message.text or 'RESULTADOS' in message.text):
+                if message.text and ('RENIEC X NOMBRES' in message.text or 'RESULTADOS' in message.text or 'DNI ➾' in message.text or 'Ahora puedes previsualizar' in message.text):
                     bot_responses.append(message.text)
+                    logger.info(f"Respuesta del bot detectada: {message.text[:100]}...")
                 elif message.media and isinstance(message.media, MessageMediaDocument):
                     # Es un archivo .txt
                     try:
@@ -124,6 +132,37 @@ async def consult_nm_async(nombres, apellidos):
                         logger.info(f"Archivo .txt descargado y procesado: {len(txt_content)} caracteres")
                     except Exception as e:
                         logger.error(f"Error descargando archivo .txt: {e}")
+                elif message.media and hasattr(message.media, 'photo'):
+                    # Es una foto - extraer DNI del mensaje si es posible
+                    try:
+                        # Buscar DNI en el texto del mensaje o en mensajes anteriores
+                        dni_match = re.search(r'DNI ➾ (\d+)', message.text or '')
+                        if not dni_match:
+                            # Buscar en mensajes anteriores
+                            for prev_msg in messages:
+                                if prev_msg.text and 'DNI ➾' in prev_msg.text:
+                                    dni_match = re.search(r'DNI ➾ (\d+)', prev_msg.text)
+                                    if dni_match:
+                                        break
+                        
+                        if dni_match:
+                            dni = dni_match.group(1)
+                            # Descargar foto y convertir a base64
+                            photo_bytes = await client.download_media(message.media, file=BytesIO())
+                            photo_bytes.seek(0)
+                            photo_base64 = base64.b64encode(photo_bytes.getvalue()).decode('utf-8')
+                            photos_data[f"foto_{dni}"] = f"data:image/jpeg;base64,{photo_base64}"
+                            logger.info(f"Foto extraída para DNI {dni}")
+                        else:
+                            # Si no encontramos DNI específico, usar timestamp como identificador
+                            timestamp = int(message.date.timestamp())
+                            photo_bytes = await client.download_media(message.media, file=BytesIO())
+                            photo_bytes.seek(0)
+                            photo_base64 = base64.b64encode(photo_bytes.getvalue()).decode('utf-8')
+                            photos_data[f"foto_{timestamp}"] = f"data:image/jpeg;base64,{photo_base64}"
+                            logger.info(f"Foto extraída con timestamp {timestamp}")
+                    except Exception as e:
+                        logger.error(f"Error extrayendo foto: {e}")
         
         if not bot_responses:
             raise Exception("No se recibió respuesta del bot")
@@ -133,6 +172,10 @@ async def consult_nm_async(nombres, apellidos):
         
         # Parsear respuesta
         parsed_data = parse_nm_response(combined_text)
+        
+        # Agregar fotos si las hay
+        if photos_data:
+            parsed_data['fotos'] = photos_data
         
         return parsed_data
         
