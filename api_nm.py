@@ -514,12 +514,9 @@ def delete_key():
             'error': f'Error interno: {str(e)}'
         }), 500
 
-# Diccionario para almacenar resultados temporalmente
-pending_results = {}
-
 @app.route('/nm', methods=['GET'])
 def nm_result():
-    """Endpoint para búsqueda por nombres."""
+    """Endpoint para búsqueda por nombres - Respuesta síncrona."""
     # Validar API Key
     api_key = request.args.get('key')
     validation = validate_api_key(api_key)
@@ -543,83 +540,56 @@ def nm_result():
     # Generar request_id único para esta consulta
     request_id = str(uuid.uuid4())[:8]
     
-    # Enviar comando al bot de forma asíncrona
     try:
-        # Ejecutar en background
-        def send_command_async():
-            try:
-                result = consult_nm_sync(nombres, apellidos, request_id)
-                pending_results[request_id] = result
-                logger.info(f"[{request_id}] Resultado guardado: {result.get('success', False)}")
-            except Exception as e:
-                pending_results[request_id] = {
-                    'success': False,
-                    'error': str(e)
-                }
-                logger.error(f"[{request_id}] Error en background: {e}")
+        # Realizar consulta síncrona (espera la respuesta completa)
+        result = consult_nm_sync(nombres, apellidos, request_id)
         
-        threading.Thread(target=send_command_async, daemon=True).start()
-        
-        # Devolver respuesta inmediata
-        return jsonify({
-            'success': True,
-            'status': 'enviado',
-            'nombres': nombres,
-            'apellidos': apellidos,
-            'request_id': request_id,
-            'message': 'Comando enviado al bot. Usa /resultado para obtener la respuesta.',
-            'resultado_url': f'/resultado?request_id={request_id}',
-            'timestamp': datetime.now().isoformat()
-        })
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'nombres': nombres,
+                'apellidos': apellidos,
+                'data': result.get('parsed_data', {}),
+                'request_id': request_id,
+                'timestamp': datetime.now().isoformat()
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': result['error'],
+                'request_id': request_id
+            }), 500
         
     except Exception as e:
-        logger.error(f"[{request_id}] Error enviando comando: {e}")
-        return jsonify({
-            'success': False,
-            'error': f'Error enviando comando: {str(e)}',
-            'request_id': request_id
-        }), 500
-
-@app.route('/resultado', methods=['GET'])
-def resultado():
-    """Endpoint para obtener el resultado de una consulta."""
-    request_id = request.args.get('request_id')
-    
-    if not request_id:
-        return jsonify({
-            'success': False,
-            'error': 'Parámetro request_id requerido'
-        }), 400
-    
-    if request_id not in pending_results:
-        return jsonify({
-            'success': False,
-            'error': 'Request ID no encontrado o aún procesando',
-            'status': 'processing',
-            'message': 'La consulta aún está siendo procesada. Intenta en unos segundos.'
-        }), 202
-    
-    result = pending_results[request_id]
-    
-    if result['success']:
-        response = {
-            'success': True,
-            'request_id': request_id,
-            'data': result.get('parsed_data', {}),
-            'timestamp': datetime.now().isoformat()
-        }
+        logger.error(f"[{request_id}] Error consultando /nm: {e}")
         
-        # Limpiar resultado después de devolverlo
-        del pending_results[request_id]
-        
-        return jsonify(response)
-    else:
-        # Limpiar resultado de error también
-        del pending_results[request_id]
+        # Intentar reiniciar Telethon si hay error de conexión
+        if "disconnected" in str(e).lower() or "connection" in str(e).lower():
+            try:
+                restart_telethon()
+                # Reintentar una vez
+                result = consult_nm_sync(nombres, apellidos, request_id)
+                if result['success']:
+                    return jsonify({
+                        'success': True,
+                        'nombres': nombres,
+                        'apellidos': apellidos,
+                        'data': result.get('parsed_data', {}),
+                        'request_id': request_id,
+                        'timestamp': datetime.now().isoformat()
+                    })
+                else:
+                    return jsonify({
+                        'success': False,
+                        'error': result['error'],
+                        'request_id': request_id
+                    }), 500
+            except Exception as retry_error:
+                logger.error(f"[{request_id}] Error en reintento: {retry_error}")
         
         return jsonify({
             'success': False,
-            'error': result['error'],
+            'error': f'Error en la consulta: {str(e)}',
             'request_id': request_id
         }), 500
 
