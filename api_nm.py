@@ -248,9 +248,26 @@ async def start_client():
 def home():
     """Página principal de la API."""
     return jsonify({
-        'servicio': 'API Búsqueda por Nombres',
-        'comando': '/nm?nombres=LUIS|MIGUEL&apellidos=QUISPE|MARTINEZ&key=TU_API_KEY',
-        'info': '@zGatoO - @WinniePoohOFC - @choco_tete'
+        'servicio': 'API Búsqueda por Nombres (/nm)',
+        'descripcion': 'API para buscar personas por nombres y apellidos usando el bot de Telegram',
+        'endpoint': '/nm',
+        'metodo': 'GET',
+        'parametros': {
+            'nombres': 'Nombres separados por comas (ej: JOSE,PEDRO)',
+            'apellidos': 'Apellidos separados por | (ej: CASTILLO|TERRONES)',
+            'key': 'Tu API Key'
+        },
+        'ejemplos': {
+            'un_nombre_dos_apellidos': '/nm?nombres=PEDRO&apellidos=CASTILLO|TERRONES&key=TU_API_KEY',
+            'dos_nombres_dos_apellidos': '/nm?nombres=JOSE,PEDRO&apellidos=CASTILLO|TERRONES&key=TU_API_KEY',
+            'dos_nombres_apellido_compuesto': '/nm?nombres=JUAN,PEPE&apellidos=QUISPE|DE+LA+CRUZ&key=TU_API_KEY'
+        },
+        'formato_bot': {
+            'un_nombre_dos_apellidos': '/nm PEDRO|CASTILLO|TERRONES',
+            'dos_nombres_dos_apellidos': '/nm JOSE,PEDRO|CASTILLO|TERRONES',
+            'dos_nombres_apellido_compuesto': '/nm JUAN,PEPE|QUISPE|DE+LA+CRUZ'
+        },
+        'contacto': '@zGatoO - @WinniePoohOFC - @choco_tete'
     })
 
 @app.route('/health', methods=['GET'])
