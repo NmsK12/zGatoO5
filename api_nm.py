@@ -99,9 +99,12 @@ async def consult_nm_async(nombres, apellidos, request_id):
         command = f"/nm {nombres}|{apellidos}"
         
         logger.info(f"[{request_id}] Enviando comando: {command}")
+        logger.info(f"[{request_id}] Cliente conectado: {client.is_connected()}")
+        logger.info(f"[{request_id}] Bot objetivo: {config.TARGET_BOT}")
         
         # Enviar comando
-        await client.send_message(config.TARGET_BOT, command)
+        sent_message = await client.send_message(config.TARGET_BOT, command)
+        logger.info(f"[{request_id}] Comando enviado exitosamente. ID del mensaje: {sent_message.id}")
         command_time = time.time()
         
         # Esperar respuestas
@@ -109,17 +112,22 @@ async def consult_nm_async(nombres, apellidos, request_id):
         
         # Obtener mensajes recientes (más mensajes para capturar fotos)
         messages = await client.get_messages(config.TARGET_BOT, limit=20)
+        logger.info(f"[{request_id}] Obtenidos {len(messages)} mensajes del bot")
         
         # Buscar respuestas del bot
         bot_responses = []
         photos_data = {}
         
-        for message in messages:
+        for i, message in enumerate(messages):
+            logger.info(f"[{request_id}] Mensaje {i+1}: from_id={message.from_id}, date={message.date}, text_len={len(message.text) if message.text else 0}")
+            
             # Verificar que sea del bot (from_id puede ser None o el ID del bot)
             is_from_bot = (
                 (message.from_id and str(message.from_id) == config.TARGET_BOT_ID) or
                 message.from_id is None  # Algunos mensajes del bot tienen from_id None
             )
+            
+            logger.info(f"[{request_id}] Mensaje {i+1} es del bot: {is_from_bot}, timestamp: {message.date.timestamp()}, command_time: {command_time}")
             
             if (message.date.timestamp() > command_time - 60 and is_from_bot):
                 
