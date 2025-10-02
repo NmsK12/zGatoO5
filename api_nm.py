@@ -88,114 +88,104 @@ def parse_nm_response(text):
         }
 
 async def consult_nm_async(nombres, apellidos, request_id):
-    """Consulta asíncrona para /nm"""
+    """Consulta asíncrona del NM con manejo inteligente de colas."""
     global client
     
-    if not client or not client.is_connected():
-        raise Exception("Cliente de Telegram no inicializado")
-    
     try:
-        # Formatear el comando según las reglas del bot (sin request_id visible)
-        # Formato: /nm NOMBRES|APELLIDO1|APELLIDO2
-        # Nombres separados por comas, apellidos separados por |
-        command = f"/nm {nombres}|{apellidos}"
+        max_attempts = 3  # Máximo 3 intentos
         
-        logger.info(f"[{request_id}] Enviando comando: {command}")
-        logger.info(f"[{request_id}] Cliente conectado: {client.is_connected()}")
-        logger.info(f"[{request_id}] Bot objetivo: {config.TARGET_BOT}")
-        
-        # Enviar comando
-        sent_message = await client.send_message(config.TARGET_BOT, command)
-        logger.info(f"[{request_id}] Comando enviado exitosamente. ID del mensaje: {sent_message.id}")
-        command_time = time.time()
-        
-        # Esperar respuestas
-        await asyncio.sleep(5)
-        
-        # Obtener mensajes recientes (más mensajes para capturar fotos)
-        messages = await client.get_messages(config.TARGET_BOT, limit=20)
-        logger.info(f"[{request_id}] Obtenidos {len(messages)} mensajes del bot")
-        
-        # Buscar respuestas del bot
-        bot_responses = []
-        photos_data = {}
-        
-        for i, message in enumerate(messages):
-            logger.info(f"[{request_id}] Mensaje {i+1}: from_id={message.from_id}, date={message.date}, text_len={len(message.text) if message.text else 0}")
+        for attempt in range(1, max_attempts + 1):
+            logger.info(f"[{request_id}] Intento {attempt}/{max_attempts} para NM {nombres}|{apellidos}")
             
-            # Verificar que sea del bot (from_id puede ser None o el ID del bot)
-            is_from_bot = (
-                (message.from_id and str(message.from_id) == config.TARGET_BOT_ID) or
-                message.from_id is None  # Algunos mensajes del bot tienen from_id None
-            )
+            # Enviar comando /nm normal (sin request_id visible)
+            command = f"/nm {nombres}|{apellidos}"
+            await client.send_message(config.TARGET_BOT, command)
+            logger.info(f"[{request_id}] Comando /nm enviado correctamente (intento {attempt})")
             
-            logger.info(f"[{request_id}] Mensaje {i+1} es del bot: {is_from_bot}, timestamp: {message.date.timestamp()}, command_time: {command_time}")
+            # Esperar un poco antes de revisar mensajes
+            await asyncio.sleep(2)
             
-            if (message.date.timestamp() > command_time - 60 and is_from_bot):
+            # Obtener mensajes recientes
+            messages = await client.get_messages(config.TARGET_BOT, limit=20)
+            current_timestamp = time.time()
+            
+            logger.info(f"[{request_id}] Revisando {len(messages)} mensajes totales...")
+            
+            # Filtrar mensajes que sean respuestas a nuestro comando específico
+            relevant_messages = []
+            for msg in messages:
+                if msg.date.timestamp() > current_timestamp - 120:  # Últimos 2 minutos
+                    logger.info(f"[{request_id}] Mensaje reciente: {msg.text[:100] if msg.text else 'Sin texto'}... (from_id: {msg.from_id})")
+                    
+                    # Verificar que sea del bot (from_id puede ser None o el ID del bot)
+                    is_from_bot = (
+                        (msg.from_id and str(msg.from_id) == config.TARGET_BOT_ID) or
+                        msg.from_id is None  # Algunos mensajes del bot tienen from_id None
+                    )
+                    
+                    if is_from_bot and msg.text:
+                        # Verificar que sea respuesta a nuestro comando específico
+                        if ('RENIEC X NOMBRES' in msg.text or
+                            'RESULTADOS' in msg.text or
+                            'DNI ➾' in msg.text or
+                            'OLIMPO_BOT' in msg.text):
+                            relevant_messages.append(msg)
+                            logger.info(f"[{request_id}] ✅ Mensaje relevante detectado: {msg.text[:50]}...")
+            
+            logger.info(f"[{request_id}] Revisando {len(relevant_messages)} mensajes relevantes para NM {nombres}|{apellidos}...")
+            
+            for message in relevant_messages:
+                logger.info(f"[{request_id}] Mensaje relevante: {message.text[:100]}...")
                 
-                if message.text and ('RENIEC X NOMBRES' in message.text or 'RESULTADOS' in message.text or 'DNI ➾' in message.text or 'Ahora puedes previsualizar' in message.text):
-                    # Filtrar mensajes de carga y procesamiento
-                    if ('Estamos procesando tu solicitud' not in message.text and 
-                        '[⏳]' not in message.text and
-                        'Un momento por favor' not in message.text):
-                        bot_responses.append(message.text)
-                        logger.info(f"[{request_id}] Respuesta del bot detectada: {message.text[:100]}...")
-                    else:
-                        logger.info(f"[{request_id}] Mensaje de procesamiento ignorado: {message.text[:50]}...")
-                elif message.media and isinstance(message.media, MessageMediaDocument):
-                    # Es un archivo .txt
-                    try:
-                        file_content = await client.download_media(message.media, file=BytesIO())
-                        file_content.seek(0)
-                        txt_content = file_content.read().decode('utf-8', errors='ignore')
-                        bot_responses.append(txt_content)
-                        logger.info(f"[{request_id}] Archivo .txt descargado y procesado: {len(txt_content)} caracteres")
-                    except Exception as e:
-                        logger.error(f"[{request_id}] Error descargando archivo .txt: {e}")
-                elif message.media and hasattr(message.media, 'photo'):
-                    # Es una foto - verificar que no sea del mensaje de carga
-                    try:
-                        # Solo procesar fotos si hay texto asociado con DNI
-                        if message.text and 'DNI ➾' in message.text:
-                            # Buscar DNI en el texto del mensaje
-                            dni_match = re.search(r'DNI ➾ (\d+)', message.text)
-                            
-                            if dni_match:
-                                dni = dni_match.group(1)
-                                # Descargar foto y convertir a base64
-                                photo_bytes = await client.download_media(message.media, file=BytesIO())
-                                photo_bytes.seek(0)
-                                photo_base64 = base64.b64encode(photo_bytes.getvalue()).decode('utf-8')
-                                photos_data[f"foto_{dni}"] = f"data:image/jpeg;base64,{photo_base64}"
-                                logger.info(f"[{request_id}] Foto extraída para DNI {dni}")
-                            else:
-                                logger.info(f"[{request_id}] Foto detectada pero sin DNI asociado - ignorando")
-                        else:
-                            logger.info(f"[{request_id}] Foto detectada pero sin texto de DNI - ignorando")
-                    except Exception as e:
-                        logger.error(f"[{request_id}] Error extrayendo foto: {e}")
+                # Buscar mensajes de espera/procesamiento
+                if "espera" in message.text.lower() and "segundos" in message.text.lower():
+                    wait_match = re.search(r'(\d+)\s*segundos?', message.text)
+                    if wait_match:
+                        wait_time = int(wait_match.group(1))
+                        logger.info(f"[{request_id}] Esperando {wait_time} segundos...")
+                        await asyncio.sleep(wait_time)
+                        continue
+                
+                # Buscar respuesta específica para NM
+                clean_message = message.text.replace('`', '').replace('*', '').replace('**', '')
+                if ('RENIEC X NOMBRES' in clean_message and 
+                    ('OLIMPO_BOT' in clean_message or 'GRATIS' in clean_message)):
+                    
+                    logger.info(f"[{request_id}] ¡Respuesta encontrada para NM {nombres}|{apellidos}!")
+                    logger.info(f"[{request_id}] Texto completo: {message.text}")
+                    
+                    # Encontramos la respuesta
+                    text_data = message.text
+                    
+                    parsed_data = parse_nm_response(text_data)
+                    logger.info(f"[{request_id}] Datos parseados: {parsed_data}")
+                    
+                    return {
+                        'success': True,
+                        'text_data': text_data,
+                        'parsed_data': parsed_data,
+                        'request_id': request_id
+                    }
+            
+            # Si no se encontró respuesta, esperar antes del siguiente intento
+            if attempt < max_attempts:
+                logger.warning(f"[{request_id}] No se detectó respuesta en intento {attempt}. Esperando 3 segundos...")
+                await asyncio.sleep(3)
         
-        if not bot_responses:
-            raise Exception(f"[{request_id}] No se recibió respuesta del bot")
-        
-        # Combinar todas las respuestas
-        combined_text = '\n'.join(bot_responses)
-        
-        # Parsear respuesta
-        parsed_data = parse_nm_response(combined_text)
-        
-        # Agregar fotos si las hay
-        if photos_data:
-            parsed_data['fotos'] = photos_data
-        
-        # Agregar request_id a la respuesta
-        parsed_data['request_id'] = request_id
-        
-        return parsed_data
+        logger.error(f"[{request_id}] Timeout consultando NM {nombres}|{apellidos}")
+        return {
+            'success': False,
+            'error': 'Timeout: No se recibió respuesta después de 3 intentos',
+            'request_id': request_id
+        }
         
     except Exception as e:
-        logger.error(f"[{request_id}] Error en consulta /nm: {e}")
-        raise
+        logger.error(f"[{request_id}] Error consultando NM {nombres}|{apellidos}: {str(e)}")
+        return {
+            'success': False,
+            'error': f'Error en la consulta: {str(e)}',
+            'request_id': request_id
+        }
 
 def check_connection():
     """Verifica si el cliente está conectado y lo reconecta si es necesario."""
