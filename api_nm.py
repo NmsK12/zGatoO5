@@ -42,27 +42,36 @@ init_database()
 def parse_nm_response(text):
     """Parsea la respuesta del comando /nm"""
     try:
+        logger.info(f"Parseando texto de {len(text)} caracteres...")
+        
         # Buscar la línea de resultados (puede estar en diferentes formatos)
         results_match = re.search(r'RESULTADOS ➾ (\d+)', text)
         if not results_match:
             # Si no encuentra "RESULTADOS", contar los DNI encontrados
-            dni_count = len(re.findall(r'\*\*DNI\*\* ➾ `(\d+)`', text))
+            dni_count = len(re.findall(r'DNI ➾ (\d+)', text))
             total_results = dni_count
         else:
             total_results = int(results_match.group(1))
         
-        # Buscar todos los DNI en el texto (formato: **DNI** ➾ `123`)
-        dni_pattern = r'\*\*DNI\*\* ➾ `(\d+)`'
+        logger.info(f"Total de resultados encontrados: {total_results}")
+        
+        # Buscar todos los DNI en el texto (formato: DNI ➾ 123 o **DNI** ➾ `123`)
+        dni_pattern = r'DNI ➾ (\d+)'
         dni_matches = re.findall(dni_pattern, text)
         
-        # Buscar nombres y apellidos (formato: **NOMBRES** ➾ PEDRO ANTONIO)
-        nombres_pattern = r'\*\*NOMBRES\*\* ➾ ([^\n]+)'
-        apellidos_pattern = r'\*\*APELLIDOS\*\* ➾ ([^\n]+)'
-        edad_pattern = r'\*\*EDAD\*\* ➾ ([^\n]+)'
+        # Buscar nombres y apellidos (formato: NOMBRES ➾ PEDRO ANTONIO o **NOMBRES** ➾ PEDRO ANTONIO)
+        nombres_pattern = r'NOMBRES ➾ ([^\n]+)'
+        apellidos_pattern = r'APELLIDOS ➾ ([^\n]+)'
+        edad_pattern = r'EDAD ➾ ([^\n]+)'
         
         nombres_matches = re.findall(nombres_pattern, text)
         apellidos_matches = re.findall(apellidos_pattern, text)
         edad_matches = re.findall(edad_pattern, text)
+        
+        logger.info(f"DNIs encontrados: {len(dni_matches)}")
+        logger.info(f"Nombres encontrados: {len(nombres_matches)}")
+        logger.info(f"Apellidos encontrados: {len(apellidos_matches)}")
+        logger.info(f"Edades encontradas: {len(edad_matches)}")
         
         # Combinar datos
         results = []
@@ -74,6 +83,8 @@ def parse_nm_response(text):
                 'edad': edad_matches[i] if i < len(edad_matches) else ''
             }
             results.append(result)
+        
+        logger.info(f"Resultados parseados: {len(results)}")
         
         return {
             'total_results': total_results,
@@ -98,12 +109,11 @@ async def consult_nm_async(nombres, apellidos, request_id):
             logger.info(f"[{request_id}] Intento {attempt}/{max_attempts} para NM {nombres}|{apellidos}")
             
             # Procesar parámetros para el comando del bot
-            # Convertir comas en espacios para nombres múltiples
-            nombres_formatted = nombres.replace(',', ' ')
-            apellidos_formatted = apellidos.replace(',', ' ')
+            # NO convertir comas en espacios - el bot espera comas para nombres múltiples
+            # Solo asegurar que no haya espacios extra
             
             # Enviar comando /nm con formato correcto para el bot
-            command = f"/nm {nombres_formatted}|{apellidos_formatted}"
+            command = f"/nm {nombres}|{apellidos}"
             await client.send_message(config.TARGET_BOT, command)
             logger.info(f"[{request_id}] Comando /nm enviado: {command} (intento {attempt})")
             
