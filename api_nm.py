@@ -97,10 +97,15 @@ async def consult_nm_async(nombres, apellidos, request_id):
         for attempt in range(1, max_attempts + 1):
             logger.info(f"[{request_id}] Intento {attempt}/{max_attempts} para NM {nombres}|{apellidos}")
             
-            # Enviar comando /nm normal (sin request_id visible)
-            command = f"/nm {nombres}|{apellidos}"
+            # Procesar parámetros para el comando del bot
+            # Convertir comas en espacios para nombres múltiples
+            nombres_formatted = nombres.replace(',', ' ')
+            apellidos_formatted = apellidos.replace(',', ' ')
+            
+            # Enviar comando /nm con formato correcto para el bot
+            command = f"/nm {nombres_formatted}|{apellidos_formatted}"
             await client.send_message(config.TARGET_BOT, command)
-            logger.info(f"[{request_id}] Comando /nm enviado correctamente (intento {attempt})")
+            logger.info(f"[{request_id}] Comando /nm enviado: {command} (intento {attempt})")
             
             # Esperar un poco antes de revisar mensajes
             await asyncio.sleep(2)
@@ -135,10 +140,10 @@ async def consult_nm_async(nombres, apellidos, request_id):
             logger.info(f"[{request_id}] Revisando {len(relevant_messages)} mensajes relevantes para NM {nombres}|{apellidos}...")
             
             for message in relevant_messages:
-                logger.info(f"[{request_id}] Mensaje relevante: {message.text[:100]}...")
+                logger.info(f"[{request_id}] Mensaje relevante: {message.text[:100] if message.text else 'Sin texto'}...")
                 
                 # Buscar mensajes de espera/procesamiento
-                if "espera" in message.text.lower() and "segundos" in message.text.lower():
+                if message.text and "espera" in message.text.lower() and "segundos" in message.text.lower():
                     wait_match = re.search(r'(\d+)\s*segundos?', message.text)
                     if wait_match:
                         wait_time = int(wait_match.group(1))
@@ -146,26 +151,69 @@ async def consult_nm_async(nombres, apellidos, request_id):
                         await asyncio.sleep(wait_time)
                         continue
                 
-                # Buscar respuesta específica para NM
-                clean_message = message.text.replace('`', '').replace('*', '').replace('**', '')
-                if ('RENIEC X NOMBRES' in clean_message and 
-                    ('OLIMPO_BOT' in clean_message or 'GRATIS' in clean_message)):
+                # Verificar si el mensaje tiene un archivo adjunto
+                if message.media and hasattr(message.media, 'document'):
+                    logger.info(f"[{request_id}] 📎 Archivo detectado: {message.media.document.mime_type}")
                     
-                    logger.info(f"[{request_id}] ¡Respuesta encontrada para NM {nombres}|{apellidos}!")
-                    logger.info(f"[{request_id}] Texto completo: {message.text}")
-                    
-                    # Encontramos la respuesta
-                    text_data = message.text
-                    
-                    parsed_data = parse_nm_response(text_data)
-                    logger.info(f"[{request_id}] Datos parseados: {parsed_data}")
-                    
-                    return {
-                        'success': True,
-                        'text_data': text_data,
-                        'parsed_data': parsed_data,
-                        'request_id': request_id
-                    }
+                    # Verificar si es un archivo .txt
+                    if message.media.document.mime_type == 'text/plain':
+                        logger.info(f"[{request_id}] 📄 Archivo .txt detectado, descargando...")
+                        
+                        try:
+                            # Descargar el archivo
+                            file_path = await client.download_media(message.media, file=f"/tmp/nm_{request_id}.txt")
+                            
+                            if file_path and os.path.exists(file_path):
+                                # Leer el contenido del archivo
+                                with open(file_path, 'r', encoding='utf-8') as f:
+                                    file_content = f.read()
+                                
+                                logger.info(f"[{request_id}] 📄 Contenido del archivo leído: {len(file_content)} caracteres")
+                                
+                                # Parsear el contenido del archivo
+                                parsed_data = parse_nm_response(file_content)
+                                logger.info(f"[{request_id}] Datos parseados del archivo: {parsed_data}")
+                                
+                                # Limpiar archivo temporal
+                                try:
+                                    os.remove(file_path)
+                                except:
+                                    pass
+                                
+                                return {
+                                    'success': True,
+                                    'text_data': file_content,
+                                    'parsed_data': parsed_data,
+                                    'request_id': request_id,
+                                    'source': 'file'
+                                }
+                            else:
+                                logger.error(f"[{request_id}] Error descargando archivo")
+                        except Exception as e:
+                            logger.error(f"[{request_id}] Error procesando archivo: {str(e)}")
+                
+                # Buscar respuesta específica para NM en el texto del mensaje
+                if message.text:
+                    clean_message = message.text.replace('`', '').replace('*', '').replace('**', '')
+                    if ('RENIEC X NOMBRES' in clean_message and 
+                        ('OLIMPO_BOT' in clean_message or 'GRATIS' in clean_message)):
+                        
+                        logger.info(f"[{request_id}] ¡Respuesta encontrada para NM {nombres}|{apellidos}!")
+                        logger.info(f"[{request_id}] Texto completo: {message.text}")
+                        
+                        # Encontramos la respuesta
+                        text_data = message.text
+                        
+                        parsed_data = parse_nm_response(text_data)
+                        logger.info(f"[{request_id}] Datos parseados: {parsed_data}")
+                        
+                        return {
+                            'success': True,
+                            'text_data': text_data,
+                            'parsed_data': parsed_data,
+                            'request_id': request_id,
+                            'source': 'text'
+                        }
             
             # Si no se encontró respuesta, esperar antes del siguiente intento
             if attempt < max_attempts:
