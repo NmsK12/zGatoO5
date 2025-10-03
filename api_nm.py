@@ -55,18 +55,38 @@ def parse_nm_response(text):
         
         logger.info(f"Total de resultados encontrados: {total_results}")
         
-        # Buscar todos los DNI en el texto (formato: DNI ➾ 123 o **DNI** ➾ `123`)
-        dni_pattern = r'DNI ➾ (\d+)'
-        dni_matches = re.findall(dni_pattern, text)
+        # Buscar todos los DNI en el texto (formato: **DNI** ➾ `123` o DNI ➾ 123)
+        dni_pattern = r'\*\*DNI\*\* ➾ `(\d+)`|DNI ➾ (\d+)'
+        dni_matches = []
+        for match in re.finditer(dni_pattern, text):
+            # Extraer el primer grupo que no sea None
+            dni = match.group(1) or match.group(2)
+            if dni:
+                dni_matches.append(dni)
         
-        # Buscar nombres y apellidos (formato: NOMBRES ➾ PEDRO ANTONIO o **NOMBRES** ➾ PEDRO ANTONIO)
-        nombres_pattern = r'NOMBRES ➾ ([^\n]+)'
-        apellidos_pattern = r'APELLIDOS ➾ ([^\n]+)'
-        edad_pattern = r'EDAD ➾ ([^\n]+)'
+        # Buscar nombres y apellidos (formato: **NOMBRES** ➾ PEDRO ANTONIO o NOMBRES ➾ PEDRO ANTONIO)
+        nombres_pattern = r'\*\*NOMBRES\*\* ➾ ([^\n]+)|NOMBRES ➾ ([^\n]+)'
+        apellidos_pattern = r'\*\*APELLIDOS\*\* ➾ ([^\n]+)|APELLIDOS ➾ ([^\n]+)'
+        edad_pattern = r'\*\*EDAD\*\* ➾ ([^\n]+)|EDAD ➾ ([^\n]+)'
         
-        nombres_matches = re.findall(nombres_pattern, text)
-        apellidos_matches = re.findall(apellidos_pattern, text)
-        edad_matches = re.findall(edad_pattern, text)
+        # Procesar nombres, apellidos y edades
+        nombres_matches = []
+        for match in re.finditer(nombres_pattern, text):
+            nombre = match.group(1) or match.group(2)
+            if nombre:
+                nombres_matches.append(nombre.strip())
+        
+        apellidos_matches = []
+        for match in re.finditer(apellidos_pattern, text):
+            apellido = match.group(1) or match.group(2)
+            if apellido:
+                apellidos_matches.append(apellido.strip())
+        
+        edad_matches = []
+        for match in re.finditer(edad_pattern, text):
+            edad = match.group(1) or match.group(2)
+            if edad:
+                edad_matches.append(edad.strip())
         
         logger.info(f"DNIs encontrados: {len(dni_matches)}")
         logger.info(f"Nombres encontrados: {len(nombres_matches)}")
