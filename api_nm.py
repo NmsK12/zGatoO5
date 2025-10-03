@@ -181,49 +181,46 @@ async def consult_nm_async(nombres, apellidos, request_id):
                         await asyncio.sleep(wait_time)
                         continue
                 
-                # Verificar si el mensaje tiene un archivo adjunto
-                if message.media and hasattr(message.media, 'document'):
-                    logger.info(f"[{request_id}] 📎 Archivo detectado: {message.media.document.mime_type}")
+                # PRIORIDAD 1: Verificar si el mensaje tiene un archivo .txt adjunto
+                if message.media and hasattr(message.media, 'document') and message.media.document.mime_type == 'text/plain':
+                    logger.info(f"[{request_id}] 📄 Archivo .txt detectado, PRIORIZANDO archivo sobre texto...")
                     
-                    # Verificar si es un archivo .txt
-                    if message.media.document.mime_type == 'text/plain':
-                        logger.info(f"[{request_id}] 📄 Archivo .txt detectado, descargando...")
+                    try:
+                        # Descargar el archivo
+                        file_path = await client.download_media(message.media, file=f"/tmp/nm_{request_id}.txt")
                         
-                        try:
-                            # Descargar el archivo
-                            file_path = await client.download_media(message.media, file=f"/tmp/nm_{request_id}.txt")
+                        if file_path and os.path.exists(file_path):
+                            # Leer el contenido del archivo
+                            with open(file_path, 'r', encoding='utf-8') as f:
+                                file_content = f.read()
                             
-                            if file_path and os.path.exists(file_path):
-                                # Leer el contenido del archivo
-                                with open(file_path, 'r', encoding='utf-8') as f:
-                                    file_content = f.read()
-                                
-                                logger.info(f"[{request_id}] 📄 Contenido del archivo leído: {len(file_content)} caracteres")
-                                
-                                # Parsear el contenido del archivo
-                                parsed_data = parse_nm_response(file_content)
-                                logger.info(f"[{request_id}] Datos parseados del archivo: {parsed_data}")
-                                
-                                # Limpiar archivo temporal
-                                try:
-                                    os.remove(file_path)
-                                except:
-                                    pass
-                                
-                                return {
-                                    'success': True,
-                                    'text_data': file_content,
-                                    'parsed_data': parsed_data,
-                                    'request_id': request_id,
-                                    'source': 'file'
-                                }
-                            else:
-                                logger.error(f"[{request_id}] Error descargando archivo")
-                        except Exception as e:
-                            logger.error(f"[{request_id}] Error procesando archivo: {str(e)}")
+                            logger.info(f"[{request_id}] 📄 Contenido del archivo leído: {len(file_content)} caracteres")
+                            
+                            # Parsear SOLO el contenido del archivo
+                            parsed_data = parse_nm_response(file_content)
+                            logger.info(f"[{request_id}] Datos parseados del archivo: {parsed_data}")
+                            
+                            # Limpiar archivo temporal
+                            try:
+                                os.remove(file_path)
+                            except:
+                                pass
+                            
+                            # RETORNAR INMEDIATAMENTE - no procesar texto adicional
+                            return {
+                                'success': True,
+                                'text_data': file_content,
+                                'parsed_data': parsed_data,
+                                'request_id': request_id,
+                                'source': 'file'
+                            }
+                        else:
+                            logger.error(f"[{request_id}] Error descargando archivo")
+                    except Exception as e:
+                        logger.error(f"[{request_id}] Error procesando archivo: {str(e)}")
                 
-                # Buscar respuesta específica para NM en el texto del mensaje
-                if message.text:
+                # PRIORIDAD 2: Buscar respuesta específica para NM en el texto del mensaje (solo si NO hay archivo .txt)
+                elif message.text:
                     clean_message = message.text.replace('`', '').replace('*', '').replace('**', '')
                     if ('RENIEC X NOMBRES' in clean_message and 
                         ('OLIMPO_BOT' in clean_message or 'GRATIS' in clean_message)):
