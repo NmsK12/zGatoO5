@@ -55,38 +55,65 @@ def parse_nm_response(text):
         
         logger.info(f"Total de resultados encontrados: {total_results}")
         
-        # Buscar todos los DNI en el texto (formato: **DNI** ➾ `123` o DNI ➾ 123)
-        dni_pattern = r'\*\*DNI\*\* ➾ `(\d+)`|DNI ➾ (\d+)'
-        dni_matches = []
-        for match in re.finditer(dni_pattern, text):
-            # Extraer el primer grupo que no sea None
-            dni = match.group(1) or match.group(2)
-            if dni:
-                dni_matches.append(dni)
+        # Buscar todos los DNI en el texto (múltiples formatos posibles)
+        dni_patterns = [
+            r'DNI\s*:\s*(\d+)',        # DNI: 123 (formato del archivo .txt)
+            r'\*\*DNI\*\* ➾ `(\d+)`',  # **DNI** ➾ `123`
+            r'DNI ➾ (\d+)',            # DNI ➾ 123
+            r'DNI\s*[➾\-=]\s*(\d+)',   # DNI ➾ 123, DNI - 123, DNI = 123
+            r'DNI\s+(\d+)',            # DNI 123
+        ]
         
-        # Buscar nombres y apellidos (formato: **NOMBRES** ➾ PEDRO ANTONIO o NOMBRES ➾ PEDRO ANTONIO)
-        nombres_pattern = r'\*\*NOMBRES\*\* ➾ ([^\n]+)|NOMBRES ➾ ([^\n]+)'
-        apellidos_pattern = r'\*\*APELLIDOS\*\* ➾ ([^\n]+)|APELLIDOS ➾ ([^\n]+)'
-        edad_pattern = r'\*\*EDAD\*\* ➾ ([^\n]+)|EDAD ➾ ([^\n]+)'
+        dni_matches = []
+        for pattern in dni_patterns:
+            matches = re.findall(pattern, text)
+            if matches:
+                dni_matches.extend(matches)
+                logger.info(f"DNI pattern '{pattern}' encontró {len(matches)} matches")
+        
+        # Buscar nombres y apellidos (múltiples formatos)
+        nombres_patterns = [
+            r'NOMBRES\s*:\s*([^\n]+)',      # NOMBRES: PEDRO ANTONIO (formato del archivo .txt)
+            r'\*\*NOMBRES\*\* ➾ ([^\n]+)',  # **NOMBRES** ➾ PEDRO ANTONIO
+            r'NOMBRES ➾ ([^\n]+)',          # NOMBRES ➾ PEDRO ANTONIO
+            r'NOMBRES\s*[➾\-=]\s*([^\n]+)', # NOMBRES ➾ PEDRO ANTONIO, NOMBRES - PEDRO ANTONIO
+        ]
+        
+        apellidos_patterns = [
+            r'APELLIDOS\s*:\s*([^\n]+)',      # APELLIDOS: CASTILLO TERRONES (formato del archivo .txt)
+            r'\*\*APELLIDOS\*\* ➾ ([^\n]+)',  # **APELLIDOS** ➾ CASTILLO TERRONES
+            r'APELLIDOS ➾ ([^\n]+)',          # APELLIDOS ➾ CASTILLO TERRONES
+            r'APELLIDOS\s*[➾\-=]\s*([^\n]+)', # APELLIDOS ➾ CASTILLO TERRONES
+        ]
+        
+        edad_patterns = [
+            r'EDAD\s*:\s*([^\n]+)',      # EDAD: 67 años (formato del archivo .txt)
+            r'\*\*EDAD\*\* ➾ ([^\n]+)',  # **EDAD** ➾ 67 años
+            r'EDAD ➾ ([^\n]+)',          # EDAD ➾ 67 años
+            r'EDAD\s*[➾\-=]\s*([^\n]+)', # EDAD ➾ 67 años
+        ]
         
         # Procesar nombres, apellidos y edades
         nombres_matches = []
-        for match in re.finditer(nombres_pattern, text):
-            nombre = match.group(1) or match.group(2)
-            if nombre:
-                nombres_matches.append(nombre.strip())
+        for pattern in nombres_patterns:
+            matches = re.findall(pattern, text)
+            if matches:
+                nombres_matches.extend([m.strip() for m in matches])
+                logger.info(f"NOMBRES pattern '{pattern}' encontró {len(matches)} matches")
         
         apellidos_matches = []
-        for match in re.finditer(apellidos_pattern, text):
-            apellido = match.group(1) or match.group(2)
-            if apellido:
-                apellidos_matches.append(apellido.strip())
+        for pattern in apellidos_patterns:
+            matches = re.findall(pattern, text)
+            if matches:
+                apellidos_matches.extend([m.strip() for m in matches])
+                logger.info(f"APELLIDOS pattern '{pattern}' encontró {len(matches)} matches")
         
         edad_matches = []
-        for match in re.finditer(edad_pattern, text):
-            edad = match.group(1) or match.group(2)
-            if edad:
-                edad_matches.append(edad.strip())
+        for pattern in edad_patterns:
+            matches = re.findall(pattern, text)
+            if matches:
+                edad_matches.extend([m.strip() for m in matches])
+                logger.info(f"EDAD pattern '{pattern}' encontró {len(matches)} matches")
         
         logger.info(f"DNIs encontrados: {len(dni_matches)}")
         logger.info(f"Nombres encontrados: {len(nombres_matches)}")
@@ -195,6 +222,9 @@ async def consult_nm_async(nombres, apellidos, request_id):
                                 file_content = f.read()
                             
                             logger.info(f"[{request_id}] 📄 Contenido del archivo leído: {len(file_content)} caracteres")
+                            
+                            # Debug: Mostrar los primeros 500 caracteres del archivo
+                            logger.info(f"[{request_id}] 🔍 Primeros 500 caracteres del archivo: {file_content[:500]}")
                             
                             # Parsear SOLO el contenido del archivo
                             parsed_data = parse_nm_response(file_content)
