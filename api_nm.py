@@ -781,6 +781,22 @@ def init_telethon_thread():
     # Esperar un poco para que se inicialice
     time.sleep(5)
 
+def wait_for_telethon_ready():
+    """Espera a que Telethon esté listo antes de continuar."""
+    global is_ready
+    max_wait = 30  # máximo 30 segundos
+    wait_time = 0
+    
+    while not is_ready and wait_time < max_wait:
+        logger.info(f"Esperando que Telethon esté listo... ({wait_time}s)")
+        time.sleep(2)
+        wait_time += 2
+    
+    if is_ready:
+        logger.info("✅ Telethon está listo, iniciando Flask...")
+    else:
+        logger.warning("⚠️ Timeout esperando Telethon, iniciando Flask de todas formas...")
+
 def main():
     """Función principal."""
     # Inicializar base de datos
@@ -791,6 +807,9 @@ def main():
     
     # Inicializar Telethon en hilo separado
     init_telethon_thread()
+    
+    # Esperar a que Telethon esté listo
+    wait_for_telethon_ready()
     
     # Iniciar Flask
     port = int(os.getenv('PORT', 8080))
