@@ -697,25 +697,6 @@ def nm_result():
             'request_id': request_id
         }), 500
 
-# Inicializar Telethon automáticamente al importar el módulo
-logger.info("🚀 Inicializando nm-server...")
-
-# Inicializar base de datos
-logger.info("📊 Inicializando base de datos...")
-init_database()
-
-# Actualizar tiempo restante de todas las keys
-logger.info("⏰ Actualizando tiempo restante de API keys...")
-update_all_time_remaining()
-
-# Inicializar Telethon en hilo separado
-logger.info("📱 Inicializando Telethon en hilo separado...")
-init_telethon_thread()
-
-# Esperar a que Telethon esté listo
-logger.info("⏳ Esperando que Telethon esté listo...")
-wait_for_telethon_ready()
-
 def update_all_time_remaining():
     """Actualiza el tiempo restante de todas las API Keys"""
     try:
@@ -842,6 +823,25 @@ def main():
     port = int(os.getenv('PORT', 8080))
     logger.info(f"🌐 Iniciando API en puerto {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
+# Inicializar Telethon automáticamente al importar el módulo
+logger.info("🚀 Inicializando nm-server...")
+
+# Inicializar base de datos
+logger.info("📊 Inicializando base de datos...")
+init_database()
+
+# Actualizar tiempo restante de todas las keys
+logger.info("⏰ Actualizando tiempo restante de API keys...")
+update_all_time_remaining()
+
+# Inicializar Telethon en hilo separado
+logger.info("📱 Inicializando Telethon en hilo separado...")
+init_telethon_thread()
+
+# Esperar a que Telethon esté listo
+logger.info("⏳ Esperando que Telethon esté listo...")
+wait_for_telethon_ready()
 
 if __name__ == '__main__':
     main()
