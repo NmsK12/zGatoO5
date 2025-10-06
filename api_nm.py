@@ -738,6 +738,8 @@ def update_all_time_remaining():
 
 def init_telethon_thread():
     """Inicializa Telethon en un hilo separado con reconexión automática."""
+    logger.info("🔧 Creando función run_telethon...")
+    
     def run_telethon():
         global client, loop, is_ready
         try:
@@ -787,11 +789,16 @@ def init_telethon_thread():
             logger.error(f"Error inicializando Telethon: {str(e)}")
 
     # Iniciar en hilo separado
+    logger.info("🧵 Creando hilo de Telethon...")
     thread = threading.Thread(target=run_telethon, daemon=True)
+    logger.info("🚀 Iniciando hilo de Telethon...")
     thread.start()
+    logger.info("✅ Hilo de Telethon iniciado")
 
     # Esperar un poco para que se inicialice
+    logger.info("⏳ Esperando 5 segundos para que se inicialice...")
     time.sleep(5)
+    logger.info("✅ Espera completada")
 
 def wait_for_telethon_ready():
     """Espera a que Telethon esté listo antes de continuar."""
@@ -814,21 +821,27 @@ def wait_for_telethon_ready():
 
 def main():
     """Función principal."""
+    logger.info("🚀 Iniciando aplicación nm-server...")
+    
     # Inicializar base de datos
+    logger.info("📊 Inicializando base de datos...")
     init_database()
     
     # Actualizar tiempo restante de todas las keys
+    logger.info("⏰ Actualizando tiempo restante de API keys...")
     update_all_time_remaining()
     
     # Inicializar Telethon en hilo separado
+    logger.info("📱 Inicializando Telethon en hilo separado...")
     init_telethon_thread()
     
     # Esperar a que Telethon esté listo
+    logger.info("⏳ Esperando que Telethon esté listo...")
     wait_for_telethon_ready()
     
     # Iniciar Flask
     port = int(os.getenv('PORT', 8080))
-    logger.info(f"Iniciando API en puerto {port}")
+    logger.info(f"🌐 Iniciando API en puerto {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
 
 if __name__ == '__main__':
