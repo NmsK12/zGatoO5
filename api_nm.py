@@ -741,14 +741,17 @@ def init_telethon_thread():
     def run_telethon():
         global client, loop, is_ready
         try:
+            logger.info("🚀 Iniciando hilo de Telethon...")
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
 
+            logger.info(f"📱 Creando cliente con API_ID: {config.API_ID}")
             client = TelegramClient(
                 'telethon_session',
                 config.API_ID,
                 config.API_HASH
             )
+            logger.info("✅ Cliente de Telegram creado")
 
             async def start_telegram():
                 global is_ready
@@ -792,19 +795,22 @@ def init_telethon_thread():
 
 def wait_for_telethon_ready():
     """Espera a que Telethon esté listo antes de continuar."""
-    global is_ready
+    global is_ready, client, loop
     max_wait = 30  # máximo 30 segundos
     wait_time = 0
     
+    logger.info("⏳ Esperando que Telethon esté listo...")
+    
     while not is_ready and wait_time < max_wait:
-            logger.info(f"Esperando que Telethon esté listo... ({wait_time}s)")
-            time.sleep(2)
-            wait_time += 2
+        logger.info(f"⏳ Esperando que Telethon esté listo... ({wait_time}s) - is_ready: {is_ready}, client: {client is not None}, loop: {loop is not None}")
+        time.sleep(2)
+        wait_time += 2
     
     if is_ready:
-            logger.info("✅ Telethon está listo, iniciando Flask...")
+        logger.info("✅ Telethon está listo, iniciando Flask...")
     else:
-            logger.warning("⚠️ Timeout esperando Telethon, iniciando Flask de todas formas...")
+        logger.warning("⚠️ Timeout esperando Telethon, iniciando Flask de todas formas...")
+        logger.warning(f"⚠️ Estado final - is_ready: {is_ready}, client: {client is not None}, loop: {loop is not None}")
 
 def main():
     """Función principal."""
